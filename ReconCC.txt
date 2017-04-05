@@ -13,6 +13,7 @@ import (
 )
 
 var myLogger = shim.NewLogger("Reconciliation")
+var RowsToFetch = 100
 
 func main() {
 	
@@ -456,13 +457,72 @@ func insertRowTableTranAmounts(stub shim.ChaincodeStubInterface) error {
 	
 }
 
+func insertRowTableIndexes(stub shim.ChaincodeStubInterface) error {
+		
+	var cols []*shim.Column
+	col1 := shim.Column{Value: &shim.Column_String_{String_: "Tran"}}
+	col2 := shim.Column{Value: &shim.Column_String_{String_: "0"}}
+	cols = append(cols, &col1)
+	cols = append(cols, &col2)
+	row := shim.Row{Columns: cols}
+	
+	ok, err := stub.InsertRow("Indexes", row)
+	myLogger.Debug("insert", ok)
+	if err != nil {
+		return fmt.Errorf("insertTableOne operation failed. %s", err)
+	}
+	if !ok {
+		return errors.New("insertTableOne operation failed. Row with given key already exists")
+	}
+	
+	var cols1 []*shim.Column
+	col11 := shim.Column{Value: &shim.Column_String_{String_: "Batch"}}
+	col21 := shim.Column{Value: &shim.Column_String_{String_: "0"}}
+	cols1 = append(cols1, &col11)
+	cols1 = append(cols1, &col21)
+	row1 := shim.Row{Columns: cols1}
+	
+	ok1, err1 := stub.InsertRow("Indexes", row1)
+	myLogger.Debug("insert", ok1)
+	if err1 != nil {
+		return fmt.Errorf("insertTableOne operation failed. %s", err1)
+	}
+	if !ok1 {
+		return errors.New("insertTableOne operation failed. Row with given key already exists")
+	}
+	return nil
+	
+}
+
+
 //////////////// INIT ////////////////
 
 
 func (t *ReconChaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error)  {
 	myLogger.Debug("Init Chaincode...")
 	
-	err := createTableRecon(stub)
+	
+	err := createTableTranIndex(stub)
+	if err != nil {
+		return nil, fmt.Errorf("Error creating table Recon during init. %s", err)
+	}
+	err = createTableBatchIndex(stub)
+	if err != nil {
+		return nil, fmt.Errorf("Error creating table Recon during init. %s", err)
+	}
+	err = createTableIndexes(stub)
+	if err != nil {
+		return nil, fmt.Errorf("Error creating table Recon during init. %s", err)
+	}
+	err = insertRowTableIndexes(stub)
+	if err != nil {
+		return nil, fmt.Errorf("Error inserting row into table CompanyCounts during init. %s", err)
+	}
+	
+	
+	
+	
+	err = createTableRecon(stub)
 	if err != nil {
 		return nil, fmt.Errorf("Error creating table Recon during init. %s", err)
 	}
@@ -604,7 +664,9 @@ func (t *ReconChaincode) initiateTran_Original(stub shim.ChaincodeStubInterface,
 	// columns = append(columns, &col16)
 	row := shim.Row{Columns: columns}
 	ok, err := stub.InsertRow("Reconciliation", row)
-
+	if len(row.Columns) < 1 {
+	 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("insertTableOne operation failed. %s", err)
 	}
@@ -618,7 +680,7 @@ func (t *ReconChaincode) initiateTran_Original(stub shim.ChaincodeStubInterface,
 	t.UpdateCompanyCount(stub, billingCompany)
 	t.UpdateTranAmount(stub, "New", "Initiated", amount)
 	t.SetTranStatus(stub, args[0], "InitiateTran")
-	
+	t.SaveIndexes(stub, "Tran", epayRefNum)
 	return nil, nil
 	// myLogger.Debug("EpayId: ", epayRefNum)
 	// myLogger.Debug("Status: ", status)
@@ -676,9 +738,11 @@ func (t *ReconChaincode) gatewayTranLeg1_Original(stub shim.ChaincodeStubInterfa
 	if err != nil {
 		return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
 	}
-	
+	if len(row.Columns) < 1 {
+	 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+	}
 
-	if (entityRefNum != row.Columns[2].GetString_()) || (billNumber != row.Columns[4].GetString_()) ||  (amount != row.Columns[7].GetString_()) || (billingCompany != row.Columns[5].GetString_()) {
+	if (entityRefNum != row.Columns[2].GetString_()) || (billNumber != row.Columns[4].GetString_()) ||  (amount != row.Columns[7].GetString_()) || (strings.TrimSpace(strings.ToUpper(billingCompany)) != strings.TrimSpace(strings.ToUpper(row.Columns[5].GetString_()))) {
 		return nil, errors.New("Unable to reconcile record.")
 	}
 	
@@ -730,6 +794,7 @@ func (t *ReconChaincode) gatewayTranLeg1_Original(stub shim.ChaincodeStubInterfa
 	t.UpdateStatusCount(stub, "Initiated", "Recieved")
 	t.UpdateTranAmount(stub, "Initiated", "Recieved", amount)
 	t.SetTranStatus(stub, args[0], "GatewayTranLeg1")
+
 
 	return nil, nil
 	// returnVal := InvokeReturnValues{
@@ -831,6 +896,9 @@ func (t *ReconChaincode) gatewayTranLeg1(stub shim.ChaincodeStubInterface, args 
 	row, err := stub.GetRow("ReconTemp", columns)
 	myLogger.Debug("row", row)
 	myLogger.Debug("len(row.Columns)", len(row.Columns))
+	if len(row.Columns) < 1 {
+		return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
 	}
@@ -888,6 +956,8 @@ func (t *ReconChaincode) gatewayTranLeg1(stub shim.ChaincodeStubInterface, args 
 	t.UpdateTranAmount(stub, "Initiated", "Recieved", amount)
 	t.SetTranStatus(stub, args[0], "GatewayTranLeg1")
 
+	
+	t.SaveIndexes(stub, "Tran", epayRefNum)
 	myLogger.Debug("gatewayTranLeg1 ended successfully")
 	return nil, nil
 }
@@ -930,8 +1000,8 @@ func (t *ReconChaincode) networkTran(stub shim.ChaincodeStubInterface, args []st
 	 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
 	}
 		
-	if (amount != row.Columns[7].GetString_()) || (billingCompany != row.Columns[5].GetString_()) {
-	return nil, errors.New("Unable to reconcile record.")
+	if (amount != row.Columns[7].GetString_()) || (strings.TrimSpace(strings.ToUpper(billingCompany))) != (strings.TrimSpace(strings.ToUpper(row.Columns[5].GetString_()))) {
+		return nil, errors.New("Unable to reconcile record.")
 	}
 	
 	
@@ -1022,9 +1092,11 @@ func (t *ReconChaincode) gatewayTranLeg2(stub shim.ChaincodeStubInterface, args 
 	if err != nil {
 		return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
 	}
+	if len(row.Columns) < 1 {
+	 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+	}
 	
-	
-	if (billNumber != row.Columns[4].GetString_()) ||  (amount != row.Columns[7].GetString_()) || (billingCompany != row.Columns[5].GetString_()) {
+	if (billNumber != row.Columns[4].GetString_()) ||  (amount != row.Columns[7].GetString_()) || (strings.TrimSpace(strings.ToUpper(billingCompany)) != strings.TrimSpace(strings.ToUpper(row.Columns[5].GetString_()))) {
 		return nil, errors.New("Unable to reconcile record.")
 	}
 	entityRefNum = row.Columns[2].GetString_()
@@ -1115,9 +1187,11 @@ func (t *ReconChaincode) reconcileTran(stub shim.ChaincodeStubInterface, args []
 	if err != nil {
 		return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
 	}
-	
+	if len(row.Columns) < 1 {
+	 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+	}
 
-	if (billNumber != row.Columns[4].GetString_()) ||  (amount != row.Columns[7].GetString_()) || (billingCompany != row.Columns[5].GetString_()) {
+	if (billNumber != row.Columns[4].GetString_()) ||  (amount != row.Columns[7].GetString_()) || (strings.TrimSpace(strings.ToUpper(billingCompany)) != strings.TrimSpace(strings.ToUpper(row.Columns[5].GetString_()))) {
 		return nil, errors.New("Unable to reconcile record.")
 	}
 
@@ -1178,6 +1252,8 @@ func (t *ReconChaincode) reconcileTran(stub shim.ChaincodeStubInterface, args []
 }
 
 func (t *ReconChaincode) CreateBatch(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+	currentIndex := t.GetCurrentIndex(stub, "Batch")
+	
 	myLogger.Debug("CreateBatch started")
 	
 	var rows []shim.Row
@@ -1186,7 +1262,7 @@ func (t *ReconChaincode) CreateBatch(stub shim.ChaincodeStubInterface, args []st
 	var billCompany string
 	var flag bool
 	flag = false
-	batchID := "batch_" + strconv.Itoa(rand.Intn(100000))
+	batchID := "batch_" + strconv.Itoa(currentIndex + 1) // + strconv.Itoa(rand.Intn(100000))
 	myLogger.Debug("batchID: ",batchID)
 	timestamp := time.Now()
 	
@@ -1336,7 +1412,7 @@ func (t *ReconChaincode) CreateBatch(stub shim.ChaincodeStubInterface, args []st
 	}
 	
 	t.SetTranStatus(stub, batchID, "CreateBatch")
-	
+	t.SaveIndexes(stub, "Batch", batchID)
 	myLogger.Debug("CreateBatch ended successfully")
 	return nil, nil
 }
@@ -1531,7 +1607,7 @@ func (t *ReconChaincode) UpdateInitiatedBatch(stub shim.ChaincodeStubInterface, 
 			} else {
 				myLogger.Debug("row.Columns[8].GetString_(): ",row.Columns[8].GetString_())
 				myLogger.Debug("args[0]: ",args[0])
-				if row.Columns[8].GetString_() == string(args[0]) {
+				if strings.TrimSpace(strings.ToUpper(row.Columns[8].GetString_())) == strings.TrimSpace(strings.ToUpper(string(args[0]))) {
 					rows = append(rows, row)
 					myLogger.Debug("inside. ")
 					status := "SettlementInitiated"	
@@ -1693,7 +1769,7 @@ func (t *ReconChaincode) SettleBatch(stub shim.ChaincodeStubInterface, args []st
 			if !ok {
 				rowsToUpdate = nil
 			} else {
-				if row.Columns[8].GetString_() == args[0] {
+				if strings.TrimSpace(strings.ToUpper(row.Columns[8].GetString_())) == strings.TrimSpace(strings.ToUpper(args[0])) {
 					rows = append(rows, row)
 											
 					status := "Settled"	
@@ -1867,7 +1943,9 @@ func (t *ReconChaincode) RejectTran(stub shim.ChaincodeStubInterface, args []str
 	if err != nil {
 		return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
 	}
-	
+	if len(row.Columns) < 1 {
+	 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+	}
 	// For count purpose
 	statusTemp := row.Columns[0].GetString_()
 	//
@@ -2660,37 +2738,156 @@ func (t *ReconChaincode) SetTranStatus(stub shim.ChaincodeStubInterface, id stri
 	return nil, nil
 }
 
-func (t *ReconChaincode) GetRowsLocal(stub shim.ChaincodeStubInterface, columns []shim.Column, numberOfRows int) ([]string){
+func (t *ReconChaincode) GetUniqueIds(stub shim.ChaincodeStubInterface, numberOfRows int, tranType string) ([]string){
 	
 	var st []string
 	
-	var cols []*shim.Column
-	col := shim.Column{Value: &shim.Column_String_{String_: "Tran"}}
-	cols = append(cols, &col)
-	row, err := stub.GetRow("Indexes", cols)
-	if err != nil {
-		return nil
-	}
-	
-	maxIndex, error := strconv.Atoi(row.Columns[1].GetString_())
-	if error != nil {
-			return nil
-	}
+	maxIndex := t.GetCurrentIndex(stub, tranType)
 	minIndex := maxIndex-numberOfRows
 	
-	for i := maxIndex; i >= minIndex; i-- {
-		var columns []*shim.Column
-		col1 := shim.Column{Value: &shim.Column_String_{String_: i}}
-		columns = append(columns, &col1)
-		row, err := stub.GetRow("TranIndex", columns)
-		if err != nil {
+	//maxIndex, minIndex = t.Paginate(stub, tranType, 2, 10)
+	
+	if minIndex < 0 {
+		minIndex = 0
+	}
+	myLogger.Debug("maxIndex: ", maxIndex)
+	myLogger.Debug("minIndex: ", minIndex)
+	if tranType == "Tran" {
+		for i := maxIndex; i > minIndex; i-- {
+			var columns []shim.Column
+			col1 := shim.Column{Value: &shim.Column_String_{String_: strconv.Itoa(i)}}
+			columns = append(columns, col1)
+			row, err := stub.GetRow("TranIndex", columns)
+			if err != nil {
+				return nil
+			}
+			st = append(st, row.Columns[1].GetString_())
+		}
+	} else if tranType == "Batch" {
+		for i := maxIndex; i > minIndex; i-- {
+			myLogger.Debug("Inside batch")
+			var columns []shim.Column
+			col1 := shim.Column{Value: &shim.Column_String_{String_: strconv.Itoa(i)}}
+			columns = append(columns, col1)
+			row, err := stub.GetRow("BatchIndex", columns)
+			if err != nil {
+				return nil
+			}
+			st = append(st, row.Columns[1].GetString_())
+		}
+	} else {
+		return nil
+	}
+	myLogger.Debug("st: ", st)
+	return st
+}
+
+func (t *ReconChaincode) GetCurrentIndex(stub shim.ChaincodeStubInterface, tranType string) (int){
+
+	// Get current latest Index from ledger
+	var columns []shim.Column
+	col1Val := tranType
+	col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+	columns = append(columns, col1)		
+	row, err := stub.GetRow("Indexes", columns)
+	myLogger.Debug("row", row)
+	myLogger.Debug("len(row.Columns)", len(row.Columns))
+	if err != nil {
+		return 0
+	}
+	if len(row.Columns) < 1 {
+	 return 0
+	}
+	maxIndex, error := strconv.Atoi(row.Columns[1].GetString_())
+	if error != nil {
+		return 0
+	}
+	// end
+	
+	return maxIndex
+}
+
+func (t *ReconChaincode) SaveIndexes(stub shim.ChaincodeStubInterface, tranType string, uniqueId string) ([]string){
+
+	
+	// Get current latest Index from ledger
+	maxIndex := t.GetCurrentIndex(stub, tranType)
+	newIndex := maxIndex + 1
+	myLogger.Debug("current index: ", maxIndex)
+	myLogger.Debug("new index: ", newIndex)
+	myLogger.Debug("Current index successfully gotten")
+	// end
+	
+	// Increment index value in ledger	
+	var columns1 []*shim.Column
+	col11 := shim.Column{Value: &shim.Column_String_{String_: tranType}}
+	col21 := shim.Column{Value: &shim.Column_String_{String_: strconv.Itoa(newIndex)}}
+	columns1 = append(columns1, &col11)
+	columns1 = append(columns1, &col21)
+	insertRow := shim.Row{Columns: columns1}
+	ok, err1 := stub.ReplaceRow("Indexes", insertRow)
+	if err1 != nil {
+		return nil
+	}
+	if !ok {
+		return nil
+	}
+	myLogger.Debug("Insert: ", ok)
+	myLogger.Debug("Increment in index successfully done")
+	// end
+	
+	// Insert index and epayId/batchId mapping in table
+	if tranType == "Tran" {
+		var cols []*shim.Column
+		colm1 := shim.Column{Value: &shim.Column_String_{String_: strconv.Itoa(newIndex)}}
+		colm2 := shim.Column{Value: &shim.Column_String_{String_: uniqueId}}
+		cols = append(cols, &colm1)
+		cols = append(cols, &colm2)
+		insertRow = shim.Row{Columns: cols}
+		ok, err1 = stub.InsertRow("TranIndex", insertRow)
+
+		if err1 != nil {
 			return nil
 		}
-		st = append(st, row[0].GetString_())
+		if !ok {
+			return nil
+		}
+		myLogger.Debug("Insert: ", ok)
+		myLogger.Debug("Index-EpayId mapping successfully saved")
+	} else if tranType == "Batch" {
+		var cols []*shim.Column
+		colm1 := shim.Column{Value: &shim.Column_String_{String_: strconv.Itoa(newIndex)}}
+		colm2 := shim.Column{Value: &shim.Column_String_{String_: uniqueId}}
+		cols = append(cols, &colm1)
+		cols = append(cols, &colm2)
+		insertRow = shim.Row{Columns: cols}
+		ok, err1 = stub.InsertRow("BatchIndex", insertRow)
+
+		if err1 != nil {
+			return nil
+		}
+		if !ok {
+			return nil
+		}
+		myLogger.Debug("Insert: ", ok)
+		myLogger.Debug("Index-BatchId mapping successfully saved")
 	}
 	
+	return nil
+	// end
+}
 
-	return st
+func (t *ReconChaincode) Paginate(stub shim.ChaincodeStubInterface, tranType string, pageNumber int, pageSize int) (int, int){
+
+	maxIndex := t.GetCurrentIndex(stub, tranType)
+	
+	if pageSize * (pageNumber-1) > maxIndex {
+		newMax := maxIndex - (pageSize * (pageNumber-1))
+		newMin := newMax - pageSize
+		return newMax, newMin
+	} else {
+		return 0, 0
+	}
 }
 
 
@@ -2727,12 +2924,14 @@ func (t *ReconChaincode) Query(stub shim.ChaincodeStubInterface, function string
 		return t.GetAmounts(stub, args)
 	}  else if function == "GetRequestStatusById" {
 		return t.GetRequestStatusById(stub, args)
+	}  else if function == "GetAllTranTest" {
+		return t.GetAllTranTest(stub, args)
 	}
 	
 	return nil, errors.New("Received unknown function invocation")
 }
 
-func (t *ReconChaincode) GetTranByStatus(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+func (t *ReconChaincode) GetTranByStatus_Old(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
 	if len(args) != 1 {
 		return nil, errors.New("Incorrect number of arguments. Expecting 1")
 	}
@@ -2783,8 +2982,8 @@ func (t *ReconChaincode) GetTranByStatus(stub shim.ChaincodeStubInterface, args 
 		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 	}
 	//myLogger.Debug("reconStruct: ",reconStruct)
-	myLogger.Debug("reconBytes: ",reconBytes)
-	myLogger.Debug("before marshal Rows: ",rows)
+	//myLogger.Debug("reconBytes: ",reconBytes)
+	//myLogger.Debug("before marshal Rows: ",rows)
 	//jsonRows, err := json.Marshal(rows)
 	if err != nil {
 		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -2793,7 +2992,64 @@ func (t *ReconChaincode) GetTranByStatus(stub shim.ChaincodeStubInterface, args 
 	return reconBytes, nil
 }
 
-func (t *ReconChaincode) GetAllTran(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+func (t *ReconChaincode) GetTranByStatus(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+	epayIds := t.GetUniqueIds(stub, RowsToFetch, "Tran")
+	myLogger.Debug("epayIds: ", epayIds)
+	var Transactions []ReconciliationStruct
+	
+	var rows []shim.Row
+
+	for ei, ev := range epayIds {
+		
+		var columns []shim.Column
+		col1Val := args[0]
+		col2Val := ev
+		myLogger.Debug("ei: ", ei)
+		myLogger.Debug("col1Val: ", col1Val)
+		myLogger.Debug("col2Val: ", col2Val)
+		col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+		col2 := shim.Column{Value: &shim.Column_String_{String_: col2Val}}
+		columns = append(columns, col1)	
+		columns = append(columns, col2)	
+		row1, err := stub.GetRow("Reconciliation", columns)
+		myLogger.Debug("len(row1.Columns): ", len(row1.Columns))
+		if err != nil {
+		 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+		}
+		if len(row1.Columns) > 1 {
+			rows = append(rows, row1)
+			
+			reconStruct := ReconciliationStruct{
+				Status: row1.Columns[0].GetString_(),
+				EpayRefNum: row1.Columns[1].GetString_(),
+				EntityRefNum: row1.Columns[2].GetString_(),
+				IssuerRefNum: row1.Columns[3].GetString_(),
+				BillNumber: row1.Columns[4].GetString_(),
+				BillingCompany: row1.Columns[5].GetString_(),
+				Issuer: row1.Columns[7].GetString_(),
+				Amount: row1.Columns[6].GetString_(),
+				BatchID: row1.Columns[8].GetString_(),
+				DateTime: row1.Columns[9].GetString_(),
+				Details: row1.Columns[10].GetString_(),
+			}
+			Transactions = append(Transactions, reconStruct)
+		}
+	}
+	
+	reconBytes, err := json.Marshal(Transactions)
+	if err != nil {
+		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
+	}
+	myLogger.Debug("reconStruct: ",Transactions)
+	if err != nil {
+		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
+	}
+
+	myLogger.Debug("Rows Fetched: ", RowsToFetch)
+	return reconBytes, nil
+}
+
+func (t *ReconChaincode) GetAllTran_Old(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
 	var columns []shim.Column
 	
 	rowChannel, err := stub.GetRows("Reconciliation", columns)
@@ -2838,8 +3094,8 @@ func (t *ReconChaincode) GetAllTran(stub shim.ChaincodeStubInterface, args []str
 	if err != nil {
 		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 	}
-	myLogger.Debug("reconStruct: ",Transactions)
-	myLogger.Debug("reconBytes: ",reconBytes)
+	//myLogger.Debug("reconStruct: ",Transactions)
+	//myLogger.Debug("reconBytes: ",reconBytes)
 	//jsonRows, err := json.Marshal(rows)
 	if err != nil {
 		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -2848,7 +3104,76 @@ func (t *ReconChaincode) GetAllTran(stub shim.ChaincodeStubInterface, args []str
 	return reconBytes, nil
 }
 
-func (t *ReconChaincode) GetAllTranWithoutFilter(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+func (t *ReconChaincode) GetAllTran(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+	epayIds := t.GetUniqueIds(stub, RowsToFetch, "Tran")
+	myLogger.Debug("epayIds: ", epayIds)
+	var Transactions []ReconciliationStruct
+	
+	var rows []shim.Row
+	var st []string
+	
+	st = append(st, "Initiated")
+	st = append(st, "Recieved")
+	st = append(st, "Authorized")
+	st = append(st, "AuthRecieved")
+	st = append(st, "Reconciled")
+	// st = append(st, "BatchInitiated")
+	// st = append(st, "SettlementInitiated")
+	// st = append(st, "Settled")
+
+	for ei, ev := range epayIds {
+		for si, sv := range st {
+			var columns []shim.Column
+			col1Val := sv
+			col2Val := ev
+			myLogger.Debug("ei: ", ei)
+			myLogger.Debug("si: ", si)
+			myLogger.Debug("col1Val: ", col1Val)
+			myLogger.Debug("col2Val: ", col2Val)
+			col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+			col2 := shim.Column{Value: &shim.Column_String_{String_: col2Val}}
+			columns = append(columns, col1)	
+			columns = append(columns, col2)	
+			row1, err := stub.GetRow("Reconciliation", columns)
+			myLogger.Debug("len(row1.Columns): ", len(row1.Columns))
+			if err != nil {
+			 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+			}
+			if len(row1.Columns) > 1 {
+				rows = append(rows, row1)
+				
+				reconStruct := ReconciliationStruct{
+					Status: row1.Columns[0].GetString_(),
+					EpayRefNum: row1.Columns[1].GetString_(),
+					EntityRefNum: row1.Columns[2].GetString_(),
+					IssuerRefNum: row1.Columns[3].GetString_(),
+					BillNumber: row1.Columns[4].GetString_(),
+					BillingCompany: row1.Columns[5].GetString_(),
+					Issuer: row1.Columns[7].GetString_(),
+					Amount: row1.Columns[6].GetString_(),
+					BatchID: row1.Columns[8].GetString_(),
+					DateTime: row1.Columns[9].GetString_(),
+					Details: row1.Columns[10].GetString_(),
+				}
+				Transactions = append(Transactions, reconStruct)
+			}
+		}
+	}
+	
+	reconBytes, err := json.Marshal(Transactions)
+	if err != nil {
+		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
+	}
+	myLogger.Debug("reconStruct: ",Transactions)
+	if err != nil {
+		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
+	}
+
+	myLogger.Debug("Rows Fetched: ", RowsToFetch)
+	return reconBytes, nil
+}
+
+func (t *ReconChaincode) GetAllTranWithoutFilter_Old(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
 	var columns []shim.Column
 	
 	rowChannel, err := stub.GetRows("Reconciliation", columns)
@@ -2892,8 +3217,8 @@ func (t *ReconChaincode) GetAllTranWithoutFilter(stub shim.ChaincodeStubInterfac
 	if err != nil {
 		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 	}
-	myLogger.Debug("reconStruct: ",Transactions)
-	myLogger.Debug("reconBytes: ",reconBytes)
+	//myLogger.Debug("reconStruct: ",Transactions)
+	//myLogger.Debug("reconBytes: ",reconBytes)
 	//jsonRows, err := json.Marshal(rows)
 	if err != nil {
 		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -2902,7 +3227,76 @@ func (t *ReconChaincode) GetAllTranWithoutFilter(stub shim.ChaincodeStubInterfac
 	return reconBytes, nil
 }
 
-func (t *ReconChaincode) GetAllBatch(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+func (t *ReconChaincode) GetAllTranWithoutFilter(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+	epayIds := t.GetUniqueIds(stub, RowsToFetch, "Tran")
+	myLogger.Debug("epayIds: ", epayIds)
+	var Transactions []ReconciliationStruct
+	
+	var rows []shim.Row
+	var st []string
+	
+	st = append(st, "Initiated")
+	st = append(st, "Recieved")
+	st = append(st, "Authorized")
+	st = append(st, "AuthRecieved")
+	st = append(st, "Reconciled")
+	st = append(st, "BatchInitiated")
+	st = append(st, "SettlementInitiated")
+	st = append(st, "Settled")
+
+	for ei, ev := range epayIds {
+		for si, sv := range st {
+			var columns []shim.Column
+			col1Val := sv
+			col2Val := ev
+			myLogger.Debug("ei: ", ei)
+			myLogger.Debug("si: ", si)
+			myLogger.Debug("col1Val: ", col1Val)
+			myLogger.Debug("col2Val: ", col2Val)
+			col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+			col2 := shim.Column{Value: &shim.Column_String_{String_: col2Val}}
+			columns = append(columns, col1)	
+			columns = append(columns, col2)	
+			row1, err := stub.GetRow("Reconciliation", columns)
+			myLogger.Debug("len(row1.Columns): ", len(row1.Columns))
+			if err != nil {
+			 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+			}
+			if len(row1.Columns) > 1 {
+				rows = append(rows, row1)
+				
+				reconStruct := ReconciliationStruct{
+					Status: row1.Columns[0].GetString_(),
+					EpayRefNum: row1.Columns[1].GetString_(),
+					EntityRefNum: row1.Columns[2].GetString_(),
+					IssuerRefNum: row1.Columns[3].GetString_(),
+					BillNumber: row1.Columns[4].GetString_(),
+					BillingCompany: row1.Columns[5].GetString_(),
+					Issuer: row1.Columns[7].GetString_(),
+					Amount: row1.Columns[6].GetString_(),
+					BatchID: row1.Columns[8].GetString_(),
+					DateTime: row1.Columns[9].GetString_(),
+					Details: row1.Columns[10].GetString_(),
+				}
+				Transactions = append(Transactions, reconStruct)
+			}
+		}
+	}
+	
+	reconBytes, err := json.Marshal(Transactions)
+	if err != nil {
+		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
+	}
+	myLogger.Debug("reconStruct: ",Transactions)
+	if err != nil {
+		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
+	}
+
+	myLogger.Debug("Rows Fetched: ", RowsToFetch)
+	return reconBytes, nil
+}
+
+func (t *ReconChaincode) GetAllBatch_Old(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
 	var columns []shim.Column
 	
 	rowChannel, err := stub.GetRows("Batch", columns)
@@ -2941,8 +3335,8 @@ func (t *ReconChaincode) GetAllBatch(stub shim.ChaincodeStubInterface, args []st
 	if err != nil {
 		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 	}
-	myLogger.Debug("reconStruct: ",Batches)
-	myLogger.Debug("reconBytes: ",batchBytes)
+	//myLogger.Debug("reconStruct: ",Batches)
+	//myLogger.Debug("reconBytes: ",batchBytes)
 	//jsonRows, err := json.Marshal(rows)
 	if err != nil {
 		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -2951,7 +3345,54 @@ func (t *ReconChaincode) GetAllBatch(stub shim.ChaincodeStubInterface, args []st
 	return batchBytes, nil
 }
 
-func (t *ReconChaincode) GetBatchByStatus(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+func (t *ReconChaincode) GetAllBatch(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+	myLogger.Debug("inside")
+	batchIds := t.GetUniqueIds(stub, RowsToFetch, "Batch")
+	myLogger.Debug("batchIds: ", batchIds)
+
+	var Batches []BatchStruct
+
+	for bi, bv := range batchIds {
+		
+		var columns []shim.Column
+		col1Val := string(bv)
+		myLogger.Debug("bi: ", bi)
+		myLogger.Debug("col1Val: ", col1Val)
+		col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+		columns = append(columns, col1)	
+		row1, err := stub.GetRow("Batch", columns)
+		myLogger.Debug("len(row1.Columns): ", len(row1.Columns))
+		if err != nil {
+		 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+		}
+		if len(row1.Columns) > 1 {
+			bacthStruct := BatchStruct {
+				BatchID: row1.Columns[0].GetString_(),
+				BillingCompany: row1.Columns[1].GetString_(),
+				Issuer: row1.Columns[2].GetString_(),
+				Amount: row1.Columns[3].GetString_(),
+				Status: row1.Columns[4].GetString_(),
+				DateTime: row1.Columns[5].GetString_(),
+				Details: row1.Columns[6].GetString_(),
+			}				
+			Batches = append(Batches, bacthStruct)
+		}
+	}
+	
+	batchBytes, err := json.Marshal(Batches)
+	if err != nil {
+		myLogger.Errorf("batch transaction marshaling error %v", err)
+	}
+	myLogger.Debug("batchStruct: ",Batches)
+	if err != nil {
+		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
+	}
+
+	myLogger.Debug("Rows Fetched: ", RowsToFetch)
+	return batchBytes, nil
+}
+
+func (t *ReconChaincode) GetBatchByStatus_Old(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
 	var columns []shim.Column
 	
 	rowChannel, err := stub.GetRows("Batch", columns)
@@ -2992,13 +3433,62 @@ func (t *ReconChaincode) GetBatchByStatus(stub shim.ChaincodeStubInterface, args
 	if err != nil {
 		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 	}
-	myLogger.Debug("reconStruct: ",Batches)
-	myLogger.Debug("reconBytes: ",batchBytes)
+	//myLogger.Debug("reconStruct: ",Batches)
+	//myLogger.Debug("reconBytes: ",batchBytes)
 	//jsonRows, err := json.Marshal(rows)
 	if err != nil {
 		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
 	}
 
+	return batchBytes, nil
+}
+
+func (t *ReconChaincode) GetBatchByStatus(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+	
+	batchIds := t.GetUniqueIds(stub, RowsToFetch, "Batch")
+	myLogger.Debug("batchIds: ", batchIds)
+
+	var Batches []BatchStruct
+
+	for bi, bv := range batchIds {
+		
+		var columns []shim.Column
+		col1Val := bv
+		myLogger.Debug("bi: ", bi)
+		myLogger.Debug("col1Val: ", col1Val)
+		col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+		columns = append(columns, col1)	
+		row1, err := stub.GetRow("Batch", columns)
+		myLogger.Debug("len(row1.Columns): ", len(row1.Columns))
+		if err != nil {
+		 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+		}
+		if len(row1.Columns) > 1 {
+			if row1.Columns[4].GetString_() == args[0] {
+				bacthStruct := BatchStruct {
+					BatchID: row1.Columns[0].GetString_(),
+					BillingCompany: row1.Columns[1].GetString_(),
+					Issuer: row1.Columns[2].GetString_(),
+					Amount: row1.Columns[3].GetString_(),
+					Status: row1.Columns[4].GetString_(),
+					DateTime: row1.Columns[5].GetString_(),
+					Details: row1.Columns[6].GetString_(),
+				}				
+				Batches = append(Batches, bacthStruct)
+			}
+		}
+	}
+	
+	batchBytes, err := json.Marshal(Batches)
+	if err != nil {
+		myLogger.Errorf("batch transaction marshaling error %v", err)
+	}
+	myLogger.Debug("batchStruct: ",Batches)
+	if err != nil {
+		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
+	}
+
+	myLogger.Debug("Rows Fetched: ", RowsToFetch)
 	return batchBytes, nil
 }
 
@@ -3238,9 +3728,9 @@ func (t *ReconChaincode) GetTranByEpayID(stub shim.ChaincodeStubInterface, args 
 	if err != nil {
 		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 	}
-	myLogger.Debug("reconStruct: ",reconStruct)
-	myLogger.Debug("reconBytes: ",reconBytes)
-	myLogger.Debug("before marshal Rows: ",row)
+	//myLogger.Debug("reconStruct: ",reconStruct)
+	//myLogger.Debug("reconBytes: ",reconBytes)
+	//myLogger.Debug("before marshal Rows: ",row)
 	//jsonRows, err := json.Marshal(rows)
 	if err != nil {
 		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -3283,9 +3773,9 @@ func (t *ReconChaincode) GetBatchByBatchID(stub shim.ChaincodeStubInterface, arg
 	if err != nil {
 		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 	}
-	myLogger.Debug("bacthStruct: ",bacthStruct)
-	myLogger.Debug("batchBytes: ",batchBytes)
-	myLogger.Debug("before marshal Rows: ",row)
+	//myLogger.Debug("bacthStruct: ",bacthStruct)
+	//myLogger.Debug("batchBytes: ",batchBytes)
+	//myLogger.Debug("before marshal Rows: ",row)
 
 	if err != nil {
 		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -3445,8 +3935,8 @@ func (t *ReconChaincode) GetExceptions(stub shim.ChaincodeStubInterface, args []
 		if err != nil {
 			myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 		}
-		myLogger.Debug("reconStruct: ",Transactions)
-		myLogger.Debug("reconBytes: ",reconBytes)
+		//myLogger.Debug("reconStruct: ",Transactions)
+		//myLogger.Debug("reconBytes: ",reconBytes)
 		//jsonRows, err := json.Marshal(rows)
 		if err != nil {
 			return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -3498,8 +3988,8 @@ func (t *ReconChaincode) GetExceptions(stub shim.ChaincodeStubInterface, args []
 		if err != nil {
 			myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 		}
-		myLogger.Debug("reconStruct: ",Transactions)
-		myLogger.Debug("reconBytes: ",reconBytes)
+		//myLogger.Debug("reconStruct: ",Transactions)
+		//myLogger.Debug("reconBytes: ",reconBytes)
 		//jsonRows, err := json.Marshal(rows)
 		if err != nil {
 			return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -3551,8 +4041,8 @@ func (t *ReconChaincode) GetExceptions(stub shim.ChaincodeStubInterface, args []
 		if err != nil {
 			myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 		}
-		myLogger.Debug("reconStruct: ",Transactions)
-		myLogger.Debug("reconBytes: ",reconBytes)
+		//myLogger.Debug("reconStruct: ",Transactions)
+		//myLogger.Debug("reconBytes: ",reconBytes)
 		//jsonRows, err := json.Marshal(rows)
 		if err != nil {
 			return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -3604,8 +4094,8 @@ func (t *ReconChaincode) GetExceptions(stub shim.ChaincodeStubInterface, args []
 		if err != nil {
 			myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 		}
-		myLogger.Debug("reconStruct: ",Transactions)
-		myLogger.Debug("reconBytes: ",reconBytes)
+		//myLogger.Debug("reconStruct: ",Transactions)
+		//myLogger.Debug("reconBytes: ",reconBytes)
 		//jsonRows, err := json.Marshal(rows)
 		if err != nil {
 			return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -3658,8 +4148,8 @@ func (t *ReconChaincode) GetUnsettledBatch(stub shim.ChaincodeStubInterface, arg
 	if err != nil {
 		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
 	}
-	myLogger.Debug("reconStruct: ",Batches)
-	myLogger.Debug("reconBytes: ",batchBytes)
+	//myLogger.Debug("reconStruct: ",Batches)
+	//myLogger.Debug("reconBytes: ",batchBytes)
 	//jsonRows, err := json.Marshal(rows)
 	if err != nil {
 		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
@@ -3808,4 +4298,124 @@ func (t *ReconChaincode) GetRequestStatusById(stub shim.ChaincodeStubInterface, 
 	}
 
 	return jsonData, nil
+}
+
+func (t *ReconChaincode) GetAllTranTest(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+	
+	epayIds := t.GetUniqueIds(stub, RowsToFetch, "Tran")
+	myLogger.Debug("epayIds: ", epayIds)
+	var Transactions []ReconciliationStruct
+	
+	//var rows []shim.Row
+	var st []string
+	
+	st = append(st, "Initiated")
+	st = append(st, "Recieved")
+	st = append(st, "Authorized")
+	st = append(st, "AuthRecieved")
+	st = append(st, "Reconciled")
+	st = append(st, "BatchInitiated")
+	st = append(st, "SettlementInitiated")
+	st = append(st, "Settled")
+
+	for ei, ev := range epayIds {
+		for si, sv := range st {
+			var columns []shim.Column
+			col1Val := sv
+			col2Val := ev
+			myLogger.Debug("ei: ", ei)
+			myLogger.Debug("si: ", si)
+			myLogger.Debug("col1Val: ", col1Val)
+			myLogger.Debug("col2Val: ", col2Val)
+			col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+			col2 := shim.Column{Value: &shim.Column_String_{String_: col2Val}}
+			columns = append(columns, col1)	
+			columns = append(columns, col2)	
+			row1, err := stub.GetRow("Reconciliation", columns)
+			myLogger.Debug("len(row1.Columns): ", len(row1.Columns))
+			if err != nil {
+			 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+			}
+			if len(row1.Columns) > 1 {
+				//rows = append(rows, row1)
+				
+				reconStruct := ReconciliationStruct{
+					Status: row1.Columns[0].GetString_(),
+					EpayRefNum: row1.Columns[1].GetString_(),
+					EntityRefNum: row1.Columns[2].GetString_(),
+					IssuerRefNum: row1.Columns[3].GetString_(),
+					BillNumber: row1.Columns[4].GetString_(),
+					BillingCompany: row1.Columns[5].GetString_(),
+					Issuer: row1.Columns[7].GetString_(),
+					Amount: row1.Columns[6].GetString_(),
+					BatchID: row1.Columns[8].GetString_(),
+					DateTime: row1.Columns[9].GetString_(),
+					Details: row1.Columns[10].GetString_(),
+				}
+				Transactions = append(Transactions, reconStruct)
+			}
+		}
+	}
+	
+	reconBytes, err := json.Marshal(Transactions)
+	if err != nil {
+		myLogger.Errorf("reconciliation transaction marshaling error %v", err)
+	}
+	myLogger.Debug("reconStruct: ",Transactions)
+	if err != nil {
+		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
+	}
+
+	myLogger.Debug("Rows Fetched: ", RowsToFetch)
+	return reconBytes, nil
+}
+
+func (t *ReconChaincode) GetAllBatchTest(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+	
+	batchIds := t.GetUniqueIds(stub, RowsToFetch, "Batch")
+	myLogger.Debug("batchIds: ", batchIds)
+
+	var Batches []BatchStruct
+
+	for bi, bv := range batchIds {
+		
+		var columns []shim.Column
+		col1Val := bv
+		myLogger.Debug("bi: ", bi)
+		myLogger.Debug("col1Val: ", col1Val)
+		col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+		columns = append(columns, col1)	
+		row1, err := stub.GetRow("Batch", columns)
+		myLogger.Debug("len(row1.Columns): ", len(row1.Columns))
+		if err != nil {
+		 return nil, fmt.Errorf("getRowTableOne operation failed. %s", err)
+		}
+		if len(row1.Columns) > 1 {
+			//rows = append(rows, row1)
+			
+			bacthStruct := BatchStruct{
+				BatchID: row1.Columns[0].GetString_(),
+				BillingCompany: row1.Columns[1].GetString_(),
+				Issuer: row1.Columns[2].GetString_(),
+				Amount: row1.Columns[3].GetString_(),
+				Status: row1.Columns[4].GetString_(),
+				DateTime: row1.Columns[5].GetString_(),
+				Details: row1.Columns[6].GetString_(),
+			}				
+
+			Batches = append(Batches, bacthStruct)
+		}
+	}
+	
+	batchBytes, err := json.Marshal(Batches)
+	if err != nil {
+		myLogger.Errorf("batch transaction marshaling error %v", err)
+	}
+	myLogger.Debug("batchStruct: ",Batches)
+	if err != nil {
+		return nil, fmt.Errorf("Operation failed. Error marshaling JSON: %s", err)
+	}
+
+	myLogger.Debug("Rows Fetched: ", RowsToFetch)
+	return batchBytes, nil
 }
