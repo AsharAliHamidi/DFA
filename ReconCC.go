@@ -1245,9 +1245,13 @@ func (t *ReconChaincode) gatewayTranLeg2(stub shim.ChaincodeStubInterface, args 
 	}
 	myLogger.Debug("Insert: ", ok)
 	
-	t.UpdateStatusCount(stub, "Authorized", "AuthRecieved")
-	t.UpdateTranAmount(stub, "Authorized", "AuthRecieved", amount)
+	//t.UpdateStatusCount(stub, "Authorized", "AuthRecieved")
+	//t.UpdateTranAmount(stub, "Authorized", "AuthRecieved", amount)
 	t.SetTranStatus(stub, args[0], "GatewayTranLeg2")
+	
+	t.UpdateStatusCount(stub, "Authorized", "Reconciled")
+	t.UpdateTranAmount(stub, "Authorized", "Reconciled", amount)
+	t.SetTranStatus(stub, args[0], "ReconcileTran")
 	
 	myLogger.Debug("gatewayTranLeg2 ended successfully")
 	return nil, nil
