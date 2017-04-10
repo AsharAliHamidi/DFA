@@ -3034,30 +3034,20 @@ func (t *ReconChaincode) Flush(stub shim.ChaincodeStubInterface, args []string) 
 	/////////////////////////////////////////////////////////////////
 	
 		
-	batchIds := t.GetUniqueIds(stub, RowsToFetch, "Tran")
-		
-	var st1 []string
-	
-	st1 = append(st1, "SettlementInitiated")
-	st1 = append(st1, "Settled")
-	st1 = append(st1, "Rejected")
+	batchIds := t.GetUniqueIds(stub, RowsToFetch, "Batch")
 
 	for ei, ev := range batchIds {
-		for si, sv := range st1 {
-			var columns []shim.Column
-			col1Val := sv
-			col2Val := ev
-			myLogger.Debug("ei: ", ei)
-			myLogger.Debug("si: ", si)
-			col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
-			col2 := shim.Column{Value: &shim.Column_String_{String_: col2Val}}
-			columns = append(columns, col1)	
-			columns = append(columns, col2)	
-			err := stub.DeleteRow("Batch", columns)
-			if err != nil {
-				return nil, fmt.Errorf("Recon operation failed. %s", err)
-			}
+		
+		var columns []shim.Column
+		col1Val := ev
+		myLogger.Debug("ei: ", ei)
+		col1 := shim.Column{Value: &shim.Column_String_{String_: col1Val}}
+		columns = append(columns, col1)	
+		err := stub.DeleteRow("Batch", columns)
+		if err != nil {
+			return nil, fmt.Errorf("Recon operation failed. %s", err)
 		}
+		
 	}
 	
 	myLogger.Debug("Batches Flushed")
