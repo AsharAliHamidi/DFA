@@ -4181,7 +4181,7 @@ func (t *ReconChaincode) GetTranByBatchID(stub shim.ChaincodeStubInterface, args
 	return reconBytes, nil
 }
 
-func (t *ReconChaincode) GetExceptions_Old(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+func (t *ReconChaincode) GetExceptions(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
 	var columns []shim.Column
 	
 	// 0 = All
@@ -4405,7 +4405,7 @@ func (t *ReconChaincode) GetExceptions_Old(stub shim.ChaincodeStubInterface, arg
 	return nil, nil
 }
 
-func (t *ReconChaincode) GetExceptions(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
+func (t *ReconChaincode) GetExceptions_Commented(stub shim.ChaincodeStubInterface, args []string) ([]byte, error){
 	//var columns []shim.Column
 	
 	// 0 = All
